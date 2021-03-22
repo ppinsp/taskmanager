@@ -1,0 +1,46 @@
+# Golang CircleCI 2.0 configuration file
+#
+# Check https://circleci.com/docs/2.0/language-go/ for more details
+version: 2.1
+jobs:
+  build_and_deploy_production:
+    docker:
+      - image: circleci/node:12.14-stretch
+    steps:
+      - checkout
+      - run: echo checkout done!
+      - setup_remote_docker
+      - run: docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
+      - run:
+          name: "Build docker image and push to docker hub"
+          command: |
+            if [ "${CIRCLE_BRANCH}" == "production" ]; then
+              docker build -t ${DOCKER_HUB_REPO}:latest .
+              docker build -t ${DOCKER_HUB_REPO}:${CIRCLE_SHA1} .
+              docker push ${DOCKER_HUB_REPO}:latest
+              docker push ${DOCKER_HUB_REPO}:${CIRCLE_SHA1}
+            else
+              echo "This is ${CIRCLE_BRANCH}"
+            fi
+      - run: echo build-docker done!
+      - run:
+          name: "Trigger rancher upgrade"
+          command: |
+            docker run --rm -it \
+              -e CATTLE_ACCESS_KEY="$CATTLE_ACCESS_KEY" \
+              -e CATTLE_SECRET_KEY="$CATTLE_SECRET_KEY" \
+              -e CATTLE_URL="$CATTLE_URL" \
+              etlweather/gaucho upgrade $RANCHER_SERVICE \
+              --imageUuid 'docker:paretk/taskmanagement:latest' \
+              --batch_size 3 --start_first \
+              --auto_complete --timeout 600 \
+              /
+      - run: echo build-docker done!
+
+workflows:
+  build_and_deploy_production:
+    jobs:
+      - build_and_deploy_production:
+          filters:
+            branches:
+              only: production
